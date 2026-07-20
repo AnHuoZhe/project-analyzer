@@ -17,10 +17,7 @@ DEFAULT_CLASSIFICATION_PATH = Path(
 )
 DEFAULT_UID = "383325863"
 DEFAULT_SPACE_URL = "https://space.bilibili.com/383325863/video"
-DEFAULT_USER_PROFILE = (
-    "25岁，AI学习阶段，探索蓄力期；常用技术栈：Python、React、DeepSeek API、Hermes/Cline；"
-    "已有项目：forge、video-pipeline、harvest、chenxi-blog；学习方向：Agent架构、AI产品、工程能力积累。"
-)
+DEFAULT_USER_PROFILE = "AI学习阶段；关注Agent架构和工程实践。"
 
 
 def _fail(stage: str, repo_key: str | None, error: dict[str, Any]) -> dict[str, Any]:
@@ -594,6 +591,7 @@ def run_pipeline(
 def main() -> dict[str, Any]:
     env = load_env(DEFAULT_ENV_PATH)
     client = build_deepseek_client(env)
+    user_profile = env.get("USER_PROFILE") or DEFAULT_USER_PROFILE
     ruler_text = _load_text_if_exists(DEFAULT_RULER_PATH)
     classification_text = _load_text_if_exists(DEFAULT_CLASSIFICATION_PATH)
 
@@ -625,7 +623,7 @@ def main() -> dict[str, Any]:
                 "perspective4b": _analyze_hidden_risks(profile, client),
             },
             run_dialectic=lambda results: _analyze_dialectic(results, client),
-            run_relevance=lambda results: _score_relevance(results, DEFAULT_USER_PROFILE, client),
+            run_relevance=lambda results: _score_relevance(results, user_profile, client),
             update_index=lambda request: _update_index(DEFAULT_INDEX_PATH, request),
         )
 
