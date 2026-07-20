@@ -1,0 +1,222 @@
+{
+  "modules": [
+    {
+      "name": "searcher.py",
+      "tasks": [
+        {
+          "id": "init_env",
+          "description": "输入：仅含 docs/ 的空项目目录；输出：Python 项目基础目录、requirements.txt、pytest 配置、最小冒烟测试及验证记录；验收：采用 pip + requirements.txt + pytest，创建 requirements.txt（pytest、requests、beautifulsoup4、python-dotenv）、pytest.ini、tests/test_smoke.py 和必要包目录；执行 `python -m pytest -q` 成功。所有 docs/test-results/*.json 固定包含 task_id、command、status（passed|failed）、timestamp、failure_summary（成功时为 null）五个字段；本任务按同一 schema 写入 docs/test-results/init_env.json。",
+          "status": "pending",
+          "depends_on": [],
+          "test_result_path": "docs/test-results/init_env.json",
+          "output_files": ["requirements.txt", "pytest.ini", "tests/test_smoke.py", "tests/__init__.py", "docs/test-results/init_env.json"]
+        },
+        {
+          "id": "searcher_extract_video_repositories",
+          "description": "输入：UP 主 UID 383325863、空间页和最新视频简介；输出：按出现顺序提取的 GitHub URL 候选；验收：只使用“空间页取最新 BV 号→视频简介正则提取 github.com 链接”路径，并将页面或链接失败表示为可定位错误。",
+          "status": "pending",
+          "depends_on": ["init_env"],
+          "test_result_path": "docs/test-results/searcher_extract_video_repositories.json",
+          "output_files": ["searcher.py", "tests/test_searcher.py"]
+        },
+        {
+          "id": "searcher_normalize_and_deduplicate_repositories",
+          "description": "输入：原始 GitHub URL 候选；输出：最多十个规范仓库对象（repo_key、https URL）；验收：移除协议、www、末尾斜杠、.git、片段和查询参数，仅接受 GitHub 两段路径，按 lowercase(owner/repo) 去重并保留稳定顺序。",
+          "status": "pending",
+          "depends_on": ["searcher_extract_video_repositories"],
+          "test_result_path": "docs/test-results/searcher_normalize_and_deduplicate_repositories.json",
+          "output_files": ["searcher.py", "tests/test_searcher.py"]
+        },
+        {
+          "id": "searcher_clone_repositories_with_proxy_cleanup",
+          "description": "输入：规范仓库对象和既有配置提供的下载目录；输出：每个仓库的 clone/已存在结果；验收：Git 克隆仅在受控临时全局代理 http://127.0.0.1:7890 下执行，操作后恢复原全局代理值或清除本次设置，单仓库失败返回 GIT_CLONE_FAILED 且不阻断其他仓库。",
+          "status": "pending",
+          "depends_on": ["searcher_normalize_and_deduplicate_repositories"],
+          "test_result_path": "docs/test-results/searcher_clone_repositories_with_proxy_cleanup.json",
+          "output_files": ["searcher.py", "tests/test_searcher.py"]
+        }
+      ]
+    },
+    {
+      "name": "indexer.py",
+      "tasks": [
+        {
+          "id": "indexer_query_history",
+          "description": "输入：repo_key 与可选 project_type、tags，以及固定 Markdown 索引路径；输出：exact_matches、same_kind_matches 和采用规则的 JSON envelope；验收：先精确匹配，再仅在类型相同且标签有交集时判同类，缺少类型或标签时只精确匹配，读取失败返回 INDEX_READ_FAILED。",
+          "status": "pending",
+          "depends_on": ["init_env"],
+          "test_result_path": "docs/test-results/indexer_query_history.json",
+          "output_files": ["indexer.py", "tests/test_indexer.py"]
+        },
+        {
+          "id": "indexer_render_idempotent_markdown_blocks",
+          "description": "输入：IndexUpdateRequest（含已校验 P3 发现、repo_key、类型、标签、日期、分数、报告路径、run_id）；输出：按项目键和 repo_key:dimension:label 幂等替换的索引与分类库全文；验收：生成规定 HTML 锚点区块、六维分类区块和 pending-update 标记，不重复追加同一幂等键。",
+          "status": "pending",
+          "depends_on": ["indexer_query_history"],
+          "test_result_path": "docs/test-results/indexer_render_idempotent_markdown_blocks.json",
+          "output_files": ["indexer.py", "tests/test_indexer.py"]
+        },
+        {
+          "id": "indexer_atomic_update_and_recovery",
+          "description": "输入：待写入的两份 Markdown 全文、update_id 与恢复载荷；输出：updated 结果或可恢复错误；验收：使用索引锁、同目录临时文件、flush/fsync，先原子替换分类库再替换项目索引，并以 pending/committed 标记实现重试恢复；锁冲突、写入失败和缺恢复载荷分别返回 INDEX_LOCKED、INDEX_WRITE_FAILED、INDEX_RECOVERY_REQUIRED。",
+          "status": "pending",
+          "depends_on": ["indexer_render_idempotent_markdown_blocks"],
+          "test_result_path": "docs/test-results/indexer_atomic_update_and_recovery.json",
+          "output_files": ["indexer.py", "tests/test_indexer.py"]
+        }
+      ]
+    },
+    {
+      "name": "scanner.py",
+      "tasks": [
+        {
+          "id": "scanner_collect_project_profile",
+          "description": "输入：本地仓库路径与 repo_key；输出：ProjectProfile JSON；验收：读取 README、前三层目录树、关键文件、语言/框架/入口线索，按架构规定的截断上限产生 truncation_warnings，且不调用模型。",
+          "status": "pending",
+          "depends_on": ["searcher_clone_repositories_with_proxy_cleanup", "indexer_query_history"],
+          "test_result_path": "docs/test-results/scanner_collect_project_profile.json",
+          "output_files": ["scanner.py", "tests/test_scanner.py"]
+        },
+        {
+          "id": "scanner_validate_project_profile_contract",
+          "description": "输入：扫描得到的 ProjectProfile；输出：版本化成功 envelope 或 SCAN_PROFILE_INVALID；验收：校验 schema_version=1、必填字段、枚举/字段类型和 README 12000 字符、目录树 300 项、关键文件 20 项及每段 8000 字符上限，非法资料不启动 analyzer。",
+          "status": "pending",
+          "depends_on": ["scanner_collect_project_profile"],
+          "test_result_path": "docs/test-results/scanner_validate_project_profile_contract.json",
+          "output_files": ["scanner.py", "tests/test_scanner.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective1.py",
+      "tasks": [
+        {
+          "id": "perspective1_generate_project_overview",
+          "description": "输入：已校验的 ProjectProfile JSON；输出：说明“是什么、解决什么、谁使用”的版本化分析 envelope；验收：经 stdin 或具名 JSON 文件接收输入，并只通过 stdout 或单个具名 JSON 文件输出一次结果。",
+          "status": "pending",
+          "depends_on": ["scanner_validate_project_profile_contract"],
+          "test_result_path": "docs/test-results/perspective1_generate_project_overview.json",
+          "output_files": ["analyzer_perspective1.py", "tests/test_analyzer_perspective1.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective2.py",
+      "tasks": [
+        {
+          "id": "perspective2_generate_architecture_analysis",
+          "description": "输入：已校验的 ProjectProfile JSON；输出：模块、前后端、数据流和核心实现的版本化分析 envelope；验收：使用规定 JSON 进出契约，不 import 其他 analyzer，并可定位模型或输入失败。",
+          "status": "pending",
+          "depends_on": ["scanner_validate_project_profile_contract"],
+          "test_result_path": "docs/test-results/perspective2_generate_architecture_analysis.json",
+          "output_files": ["analyzer_perspective2.py", "tests/test_analyzer_perspective2.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective3.py",
+      "tasks": [
+        {
+          "id": "perspective3_generate_six_dimension_assessment",
+          "description": "输入：已校验的 ProjectProfile 和固定六维分类尺子；输出：六个固定维度及 classification_findings 的版本化 envelope；验收：每维含 applicable、judgement、evidence、recommendations，judgement 与 applicable 一致，且不直接写分类库。",
+          "status": "pending",
+          "depends_on": ["scanner_validate_project_profile_contract"],
+          "test_result_path": "docs/test-results/perspective3_generate_six_dimension_assessment.json",
+          "output_files": ["analyzer_perspective3.py", "tests/test_analyzer_perspective3.py"]
+        },
+        {
+          "id": "perspective3_validate_machine_readable_schema",
+          "description": "输入：视角 3 原始模型结果；输出：合规结果或 PERSPECTIVE3_SCHEMA_INVALID；验收：拒绝缺失/额外维度、非法 judgement、非字符串证据或建议，以及不属于六个固定键的 classification_findings。",
+          "status": "pending",
+          "depends_on": ["perspective3_generate_six_dimension_assessment"],
+          "test_result_path": "docs/test-results/perspective3_validate_machine_readable_schema.json",
+          "output_files": ["analyzer_perspective3.py", "tests/test_analyzer_perspective3.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective4b.py",
+      "tasks": [
+        {
+          "id": "perspective4b_generate_hidden_risk_analysis",
+          "description": "输入：已校验的 ProjectProfile JSON；输出：数据流、失败模式、状态、分层和运维隐患的版本化分析 envelope；验收：遵守独立 subprocess JSON 契约，不 import 其他 analyzer，并保留可定位失败信息。",
+          "status": "pending",
+          "depends_on": ["scanner_validate_project_profile_contract"],
+          "test_result_path": "docs/test-results/perspective4b_generate_hidden_risk_analysis.json",
+          "output_files": ["analyzer_perspective4b.py", "tests/test_analyzer_perspective4b.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective4a.py",
+      "tasks": [
+        {
+          "id": "perspective4a_generate_dialectic_analysis",
+          "description": "输入：P1、P2、P3、P4B 的具名 JSON 结果；输出：辩证法分析的版本化 envelope；验收：只消费 JSON 而不 import 任何 analyzer，缺失或失败的前序结果返回可定位错误。",
+          "status": "pending",
+          "depends_on": ["perspective1_generate_project_overview", "perspective2_generate_architecture_analysis", "perspective3_validate_machine_readable_schema", "perspective4b_generate_hidden_risk_analysis"],
+          "test_result_path": "docs/test-results/perspective4a_generate_dialectic_analysis.json",
+          "output_files": ["analyzer_perspective4a.py", "tests/test_analyzer_perspective4a.py"]
+        }
+      ]
+    },
+    {
+      "name": "analyzer_perspective5.py",
+      "tasks": [
+        {
+          "id": "perspective5_score_personal_relevance",
+          "description": "输入：全部前序分析 JSON 和固定用户画像；输出：适用性、建议及 relevance_score 的版本化 envelope；验收：仅在所有前序结果成功后评分，分数可供 orchestrator 稳定排序，输入失败不产生伪造评分。",
+          "status": "pending",
+          "depends_on": ["perspective4a_generate_dialectic_analysis"],
+          "test_result_path": "docs/test-results/perspective5_score_personal_relevance.json",
+          "output_files": ["analyzer_perspective5.py", "tests/test_analyzer_perspective5.py"]
+        }
+      ]
+    },
+    {
+      "name": "orchestrator.py",
+      "tasks": [
+        {
+          "id": "orchestrator_load_configuration_and_run_contract",
+          "description": "输入：hermes/.env、固定外部路径和 CLI 参数；输出：每次运行的配置、run_id、内存 dict 状态与中间 JSON 目录；验收：加载 deepseek-chat，统一 120 秒超时和一次重试，JSON 成功/失败 envelope 使用 schema_version=1，且不引入持久状态模块或 SQLite。",
+          "status": "pending",
+          "depends_on": ["init_env"],
+          "test_result_path": "docs/test-results/orchestrator_load_configuration_and_run_contract.json",
+          "output_files": ["orchestrator.py", "tests/test_orchestrator.py"]
+        },
+        {
+          "id": "orchestrator_gate_history_before_analysis",
+          "description": "输入：searcher 候选、indexer query 和 scanner 结果；输出：每仓库 history_checked、skipped_analyzed 或 scanned 状态；验收：扫描及并行分析前先精确查询，扫描后按类型/标签再查询；任一次命中都记录 matched_repo_keys、same_kind_rule、skip_reason，且不调用 analyzer、不更新索引、不写报告。",
+          "status": "pending",
+          "depends_on": ["orchestrator_load_configuration_and_run_contract", "searcher_clone_repositories_with_proxy_cleanup", "indexer_query_history", "scanner_validate_project_profile_contract"],
+          "test_result_path": "docs/test-results/orchestrator_gate_history_before_analysis.json",
+          "output_files": ["orchestrator.py", "tests/test_orchestrator.py"]
+        },
+        {
+          "id": "orchestrator_run_analysis_pipeline",
+          "description": "输入：未命中历史的 ProjectProfile；输出：并行 P1/P2/P3/P4B、串行 P4A/P5 的中间 JSON 与阶段状态；验收：通过 subprocess 调度 analyzer，状态按 scanned→parallel_analyzed→dialectic_analyzed→fitness_analyzed 迁移，单项目失败记录 failed_stage/error_code/message/recovery 信息且不阻断其他项目。",
+          "status": "pending",
+          "depends_on": ["orchestrator_gate_history_before_analysis", "perspective1_generate_project_overview", "perspective2_generate_architecture_analysis", "perspective3_validate_machine_readable_schema", "perspective4b_generate_hidden_risk_analysis", "perspective4a_generate_dialectic_analysis", "perspective5_score_personal_relevance"],
+          "test_result_path": "docs/test-results/orchestrator_run_analysis_pipeline.json",
+          "output_files": ["orchestrator.py", "tests/test_orchestrator.py"]
+        },
+        {
+          "id": "orchestrator_index_analyzed_projects",
+          "description": "输入：已完成五视角的项目结果；输出：indexer update 调用结果及 indexed 状态；验收：封装 IndexUpdateRequest 并仅在 P3 合规后调用，成功才进入 indexed；锁定、写入或恢复错误保留恢复信息且绝不进入报告阶段。",
+          "status": "pending",
+          "depends_on": ["orchestrator_run_analysis_pipeline", "indexer_atomic_update_and_recovery"],
+          "test_result_path": "docs/test-results/orchestrator_index_analyzed_projects.json",
+          "output_files": ["orchestrator.py", "tests/test_orchestrator.py"]
+        },
+        {
+          "id": "orchestrator_write_reports_and_cli_display",
+          "description": "输入：indexed 项目的完整五视角结果和固定报告目录；输出：原子 Markdown 报告、reported 状态及排序后的 CLI 展示；验收：先写 tmp-run_id、flush/fsync 后 os.replace，成功无条件 indexed→reported；失败保留 indexed 和 REPORT_WRITE_FAILED 恢复输入，CLI 只读取 reported 的既有报告，并支持展开、跳过和退出。",
+          "status": "pending",
+          "depends_on": ["orchestrator_index_analyzed_projects"],
+          "test_result_path": "docs/test-results/orchestrator_write_reports_and_cli_display.json",
+          "output_files": ["orchestrator.py", "tests/test_orchestrator.py"]
+        }
+      ]
+    }
+  ]
+}

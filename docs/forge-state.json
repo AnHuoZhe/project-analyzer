@@ -1,0 +1,13 @@
+{
+  "phase": "build",
+  "current_module": "",
+  "current_task_index": 0,
+  "must_fix_count": 0,
+  "suggestion_count": 0,
+  "retry_count": 0,
+  "review_round": 0,
+  "locked": false,
+  "module_review_passed": false,
+  "completed_phases": ["clarify", "design", "review"],
+  "last_error": ""
+}
