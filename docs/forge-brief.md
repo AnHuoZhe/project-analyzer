@@ -36,12 +36,12 @@
 - 在接口定义中补充 `ProjectProfile` 的版本化字段表、必填/可选字段、字段类型、扫描片段截断单位与上限，以及 `truncation_warnings` 最小结构。
 - 为一次 `indexer.py update` 定义轻量提交标记或运行标识，说明启动/重试如何基于同一幂等键识别、重算或完成分类库与项目索引的部分提交；不得引入数据库或状态模块。
 
-## 本次任务审查
+## 模块审查（searcher.py）
 
-- 审查类型：任务审查
-- 输入：`docs/architecture.md`、`docs/tasks.json`
-- 输出：`docs/task-review.md`
-- 检查十模块覆盖、拓扑依赖、任务独立性与 schema。
+- 审查类型：中审
+- 模块代码路径：`E:\\work\\word\\study\\project-analyzer\\.worktrees\\searcher`
+- 输入：该 worktree 的 `searcher.py`、`tests/`、`docs/test-results/`、`docs/decisions/searcher.md` 及项目架构。
+- 检查：模块协作、I/O 契约、不越层、测试覆盖和架构一致性。
 
 ## 任务审查修订（必须改及简单模式建议）
 

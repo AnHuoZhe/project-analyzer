@@ -6,7 +6,7 @@
         {
           "id": "init_env",
           "description": "输入：仅含 docs/ 的空项目目录；输出：Python 项目基础目录、requirements.txt、pytest 配置、最小冒烟测试及验证记录；验收：采用 pip + requirements.txt + pytest，创建 requirements.txt（pytest、requests、beautifulsoup4、python-dotenv）、pytest.ini、tests/test_smoke.py 和必要包目录；执行 `python -m pytest -q` 成功。所有 docs/test-results/*.json 固定包含 task_id、command、status（passed|failed）、timestamp、failure_summary（成功时为 null）五个字段；本任务按同一 schema 写入 docs/test-results/init_env.json。",
-          "status": "pending",
+          "status": "done",
           "depends_on": [],
           "test_result_path": "docs/test-results/init_env.json",
           "output_files": ["requirements.txt", "pytest.ini", "tests/test_smoke.py", "tests/__init__.py", "docs/test-results/init_env.json"]
@@ -14,7 +14,7 @@
         {
           "id": "searcher_extract_video_repositories",
           "description": "输入：UP 主 UID 383325863、空间页和最新视频简介；输出：按出现顺序提取的 GitHub URL 候选；验收：只使用“空间页取最新 BV 号→视频简介正则提取 github.com 链接”路径，并将页面或链接失败表示为可定位错误。",
-          "status": "pending",
+          "status": "done",
           "depends_on": ["init_env"],
           "test_result_path": "docs/test-results/searcher_extract_video_repositories.json",
           "output_files": ["searcher.py", "tests/test_searcher.py"]
@@ -22,7 +22,7 @@
         {
           "id": "searcher_normalize_and_deduplicate_repositories",
           "description": "输入：原始 GitHub URL 候选；输出：最多十个规范仓库对象（repo_key、https URL）；验收：移除协议、www、末尾斜杠、.git、片段和查询参数，仅接受 GitHub 两段路径，按 lowercase(owner/repo) 去重并保留稳定顺序。",
-          "status": "pending",
+          "status": "done",
           "depends_on": ["searcher_extract_video_repositories"],
           "test_result_path": "docs/test-results/searcher_normalize_and_deduplicate_repositories.json",
           "output_files": ["searcher.py", "tests/test_searcher.py"]
@@ -30,7 +30,7 @@
         {
           "id": "searcher_clone_repositories_with_proxy_cleanup",
           "description": "输入：规范仓库对象和既有配置提供的下载目录；输出：每个仓库的 clone/已存在结果；验收：Git 克隆仅在受控临时全局代理 http://127.0.0.1:7890 下执行，操作后恢复原全局代理值或清除本次设置，单仓库失败返回 GIT_CLONE_FAILED 且不阻断其他仓库。",
-          "status": "pending",
+          "status": "done",
           "depends_on": ["searcher_normalize_and_deduplicate_repositories"],
           "test_result_path": "docs/test-results/searcher_clone_repositories_with_proxy_cleanup.json",
           "output_files": ["searcher.py", "tests/test_searcher.py"]
