@@ -191,8 +191,35 @@ def _score_relevance(
     return analyzer_perspective5.score_relevance(results, user_profile, client)
 
 
-def _safe_report_name(repo_key: str) -> str:
-    return repo_key.replace("/", "-").replace("\\", "-")
+CN_NUMS = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九", "十"]
+
+
+def _next_batch_num(report_dir: Path | str) -> int:
+    """从已有报告文件名中提取最大批次号，返回下一个批次号。"""
+    import re
+    directory = Path(report_dir)
+    if not directory.exists():
+        return 1
+    max_batch = 0
+    cn_to_num = {cn: i for i, cn in enumerate(CN_NUMS)}
+    for f in directory.glob("*.docx"):
+        m = re.match(r"^([一二三四五六七八九十]+)-", f.name)
+        if m:
+            cn = m.group(1)
+            num = 0
+            if len(cn) == 1:
+                num = cn_to_num.get(cn, 0)
+            elif cn == "十":
+                num = 10
+            max_batch = max(max_batch, num)
+    return max_batch + 1
+
+
+def _make_report_name(repo_key: str, date_str: str, batch_num: int, seq: int, source: str = "GitHub热榜") -> str:
+    """生成报告文件名：一-01-owner-repo-分析报告-20260720-GitHub热榜.docx"""
+    safe_key = repo_key.replace("/", "-").replace("\\", "-")
+    batch_cn = CN_NUMS[batch_num] if batch_num < len(CN_NUMS) else str(batch_num)
+    return f"{batch_cn}-{seq:02d}-{safe_key}-分析报告-{date_str}-{source}.docx"
 
 
 def render_markdown_report(item: dict[str, Any]) -> str:
@@ -229,7 +256,8 @@ def write_markdown_report(item: dict[str, Any], report_dir: Path | str = DEFAULT
     return report_path
 
 
-def write_word_report(item: dict[str, Any], report_dir: Path | str = DEFAULT_REPORT_DIR) -> Path:
+def write_word_report(item: dict[str, Any], report_dir: Path | str = DEFAULT_REPORT_DIR,
+                      date_str: str = "", batch_num: int = 1, seq: int = 1) -> Path:
     from docx import Document
     from docx.shared import Pt, Inches, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -306,7 +334,7 @@ def write_word_report(item: dict[str, Any], report_dir: Path | str = DEFAULT_REP
 
     directory = Path(report_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    report_path = directory / f"{_safe_report_name(str(repo_key))}-分析报告.docx"
+    report_path = directory / _make_report_name(str(repo_key), date_str, batch_num, seq)
     doc.save(str(report_path))
     return report_path
 
@@ -437,7 +465,11 @@ def run_cli(
     input_func: Callable[[str], str] = input,
     print_func: Callable[[str], None] = print,
     report_dir: Path | str = DEFAULT_REPORT_DIR,
+    batch_num: int = 1,
 ) -> dict[str, Any]:
+    from datetime import date
+
+    date_str = date.today().strftime("%Y%m%d")
     pipeline_result = pipeline()
     if pipeline_result.get("ok") is not True:
         print_func(f"运行失败：{pipeline_result.get('error_code', 'UNKNOWN')}")
@@ -455,7 +487,7 @@ def run_cli(
             extra = f"（{item['date']}）" if item.get("date") else ""
             print_func(f"  {item['repo_key']} — {item['reason']}{extra}")
 
-    for item in results:
+    for seq, item in enumerate(results, 1):
         repo_key = item.get("repo_key", "")
         score = item.get("relevance_score", 0)
         overview = item.get("analysis", {}).get("perspective1", {}).get("content", "")
@@ -468,7 +500,7 @@ def run_cli(
             break
         if action == "n":
             continue
-        word_path = write_word_report(item, report_dir)
+        word_path = write_word_report(item, report_dir, date_str, batch_num, seq)
         print_func(f"报告已写入：{word_path}")
         print_func(render_markdown_report(item))
         print_func(f"报告已写入：{word_path}")
@@ -627,7 +659,7 @@ def main() -> dict[str, Any]:
             update_index=lambda request: _update_index(DEFAULT_INDEX_PATH, request),
         )
 
-    return run_cli(pipeline, report_dir=DEFAULT_REPORT_DIR)
+    return run_cli(pipeline, report_dir=DEFAULT_REPORT_DIR, batch_num=_next_batch_num(DEFAULT_REPORT_DIR))
 
 
 if __name__ == "__main__":
