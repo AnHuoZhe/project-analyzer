@@ -460,6 +460,62 @@ def _write_table(doc, rows):
                     r.font.bold = True
 
 
+def _batch_state_path(report_dir: Path | str, batch_num: int, date_str: str) -> Path:
+    return Path(report_dir) / f".batch-{batch_num:02d}-{date_str}.json"
+
+
+def _load_batch_state(report_dir: Path | str, date_str: str) -> dict | None:
+    """Find incomplete batch state for the given date. Returns None if no pending batch."""
+    import json as _json
+    directory = Path(report_dir)
+    for f in sorted(directory.glob(".batch-*-*.json")):
+        try:
+            state = _json.loads(f.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        if not state.get("completed") and state.get("pending"):
+            return {**state, "_path": str(f)}
+    return None
+
+
+def _save_batch_state(
+    report_dir: Path | str, batch_num: int, date_str: str,
+    results: list[dict], pending: list[str],
+) -> Path:
+    import json as _json
+    path = _batch_state_path(report_dir, batch_num, date_str)
+    path.write_text(_json.dumps({
+        "batch_num": batch_num, "date_str": date_str,
+        "results": results, "pending": pending,
+        "completed": len(pending) == 0,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
+def _merge_and_renumber(
+    report_dir: Path | str, batch_num: int, date_str: str,
+    prev_results: list[dict], new_results: list[dict],
+) -> list[dict]:
+    """Merge previous and new results, re-sort by relevance, re-number all files."""
+    directory = Path(report_dir)
+    batch_cn = CN_NUMS[batch_num] if batch_num < len(CN_NUMS) else str(batch_num)
+    pattern = f"{batch_cn}-*-分析报告-{date_str}-GitHub热榜.docx"
+
+    # Remove old batch files
+    for old in directory.glob(pattern):
+        old.unlink(missing_ok=True)
+
+    # Merge and sort
+    all_results = prev_results + new_results
+    all_results.sort(key=lambda item: item.get("relevance_score", 0), reverse=True)
+
+    # Write all with correct sequence
+    for seq, item in enumerate(all_results, 1):
+        write_word_report(item, directory, date_str, batch_num, seq)
+
+    return all_results
+
+
 def run_cli(
     pipeline: Callable[[], dict[str, Any]],
     input_func: Callable[[str], str] = input,
@@ -505,7 +561,18 @@ def run_cli(
         print_func(render_markdown_report(item))
         print_func(f"报告已写入：{word_path}")
 
-    return {"schema_version": 1, "ok": True, "stage": "cli"}
+    # Track scan-failed repos for later retry
+    pending = []
+    for repo_key, st in pipeline_result.get("states", {}).items():
+        if st.get("failed_stage") == "scan" and repo_key not in {
+            r.get("repo_key") for r in results
+        }:
+            pending.append(repo_key)
+
+    if pending:
+        _save_batch_state(report_dir, batch_num, date_str, results, pending)
+
+    return {"schema_version": 1, "ok": True, "stage": "cli", "pending_retry": pending}
 
 
 def run_pipeline(
@@ -621,11 +688,78 @@ def run_pipeline(
 
 
 def main() -> dict[str, Any]:
+    from datetime import date
+
     env = load_env(DEFAULT_ENV_PATH)
     client = build_deepseek_client(env)
     user_profile = env.get("USER_PROFILE") or DEFAULT_USER_PROFILE
     ruler_text = _load_text_if_exists(DEFAULT_RULER_PATH)
     classification_text = _load_text_if_exists(DEFAULT_CLASSIFICATION_PATH)
+    today_str = date.today().strftime("%Y%m%d")
+
+    # ── Retry: check for incomplete batch ──
+    batch_state = _load_batch_state(DEFAULT_REPORT_DIR, today_str)
+    if batch_state:
+        prev_results = batch_state["results"]
+        pending_repos = batch_state["pending"]
+        batch_num = batch_state["batch_num"]
+        print(f"[retry] 批次 {CN_NUMS[batch_num]} 有 {len(pending_repos)} 个项目待补跑")
+
+        new_results = []
+        for repo_key in pending_repos:
+            owner, repo = repo_key.split("/", 1)
+            local_path = DEFAULT_DOWNLOAD_ROOT / f"{owner}-{repo}"
+            profile = _scan_project(str(local_path), repo_key)
+            if profile.get("ok") is not True:
+                print(f"  ✗ {repo_key} 扫描失败，跳过")
+                continue
+
+            # Run parallel perspective analysis
+            parallel = {
+                "perspective1": _analyze_profile(profile, client),
+                "perspective2": _analyze_architecture(profile, client),
+                "perspective3": _analyze_engineering(profile, client, ruler_text, classification_text),
+                "perspective4b": _analyze_hidden_risks(profile, client),
+            }
+            if any(v.get("ok") is not True for v in parallel.values()):
+                print(f"  ✗ {repo_key} 并行分析失败，跳过")
+                continue
+
+            dialectic = _analyze_dialectic(parallel, client)
+            if dialectic.get("ok") is not True:
+                print(f"  ✗ {repo_key} 辩证分析失败，跳过")
+                continue
+
+            relevance = _score_relevance({**parallel, "perspective4a": dialectic}, user_profile, client)
+            if relevance.get("ok") is not True:
+                print(f"  ✗ {repo_key} 适用性分析失败，跳过")
+                continue
+
+            new_results.append({
+                "repo_key": repo_key,
+                "relevance_score": relevance.get("relevance_score", 0),
+                "analysis": {**parallel, "perspective4a": dialectic, "perspective5": relevance},
+            })
+            # Update index
+            _update_index(DEFAULT_INDEX_PATH, {
+                "repo_key": repo_key,
+                "project_name": repo,
+                "project_type": profile.get("project_type", ""),
+                "tags": profile.get("tags", []),
+                "analysis_date": "",
+                "relevance": relevance.get("relevance_score", 0),
+                "report_path": "",
+            })
+            print(f"  ✓ {repo_key} 分析完成")
+
+        if new_results:
+            _merge_and_renumber(DEFAULT_REPORT_DIR, batch_num, today_str, prev_results, new_results)
+            print(f"[retry] 合并完成，共 {len(prev_results) + len(new_results)} 个项目已重排序")
+            # Mark batch completed
+            _save_batch_state(DEFAULT_REPORT_DIR, batch_num, today_str,
+                            prev_results + new_results, [])
+
+        return {"schema_version": 1, "ok": True, "stage": "retry"}
 
     def pipeline() -> dict[str, Any]:
         def search_projects() -> dict[str, Any]:
