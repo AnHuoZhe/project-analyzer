@@ -125,7 +125,9 @@ def test_cli_prints_overview_and_writes_report_on_enter(tmp_path: Path) -> None:
         report_dir=tmp_path,
     )
 
-    report_path = tmp_path / "owner-agent-分析报告.docx"
+    report_files = list(tmp_path.glob("*-owner-agent-分析报告-*.docx"))
+    assert len(report_files) == 1
+    report_path = report_files[0]
     assert result["ok"] is True
     assert report_path.exists()
     assert report_path.stat().st_size > 0
@@ -150,8 +152,8 @@ def test_cli_next_skips_report_and_q_exits(tmp_path: Path) -> None:
     )
 
     assert result["ok"] is True
-    assert not (tmp_path / "owner-one-分析报告.docx").exists()
-    assert not (tmp_path / "owner-two-分析报告.docx").exists()
+    assert not list(tmp_path.glob("*-owner-one-分析报告-*.docx"))
+    assert not list(tmp_path.glob("*-owner-two-分析报告-*.docx"))
     assert any("owner/one" in item for item in outputs)
     assert any("owner/two" in item for item in outputs)
 
@@ -163,7 +165,7 @@ def test_main_calls_cli_with_default_report_dir(monkeypatch, tmp_path: Path) -> 
     orchestrator.DEFAULT_ENV_PATH.write_text("DEEPSEEK_API_KEY=test-key\n", encoding="utf-8")
     monkeypatch.setattr(orchestrator, "build_deepseek_client", lambda env: lambda prompt: "model")
 
-    def fake_run_cli(pipeline, input_func=input, print_func=print, report_dir=None):
+    def fake_run_cli(pipeline, input_func=input, print_func=print, report_dir=None, batch_num=None):
         captured["report_dir"] = report_dir
         return {"ok": True, "stage": "cli"}
 
@@ -195,7 +197,7 @@ def test_main_pipeline_uses_real_module_callbacks(monkeypatch, tmp_path: Path) -
     monkeypatch.setattr(orchestrator, "_analyze_dialectic", lambda results, client: {"ok": True, "repo_key": "owner/agent", "content": "dialectic"})
     monkeypatch.setattr(orchestrator, "_score_relevance", lambda results, user_profile, client: {"ok": True, "repo_key": "owner/agent", "content": "fit", "relevance_score": 80})
 
-    def fake_run_cli(pipeline, input_func=input, print_func=print, report_dir=None):
+    def fake_run_cli(pipeline, input_func=input, print_func=print, report_dir=None, batch_num=None):
         captured["pipeline_result"] = pipeline()
         return {"ok": True, "stage": "cli"}
 
